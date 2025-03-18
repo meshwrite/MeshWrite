@@ -11,6 +11,7 @@ import { Button } from "@/components/ui"
 import { ClineMessage } from "../../../../src/shared/ExtensionMessage"
 import { mentionRegexGlobal } from "../../../../src/shared/context-mentions"
 import { HistoryItem } from "../../../../src/shared/HistoryItem"
+import { EXPERIMENT_IDS } from "../../../../src/shared/experiments"
 
 import { useExtensionState } from "../../context/ExtensionStateContext"
 import Thumbnails from "../common/Thumbnails"
@@ -27,29 +28,10 @@ interface TaskHeaderProps {
 	totalCost: number
 	contextTokens: number
 	onClose: () => void
+	openTaskCard?: (taskId: string) => void
 }
 
-const TaskHeader: React.FC<TaskHeaderProps> = ({
-	task,
-	tokensIn,
-	tokensOut,
-	doesModelSupportPromptCache,
-	cacheWrites,
-	cacheReads,
-	totalCost,
-	contextTokens,
-	onClose,
-}) => {
-	const { apiConfiguration, currentTaskItem } = useExtensionState()
-	const { selectedModelInfo } = useMemo(() => normalizeApiConfiguration(apiConfiguration), [apiConfiguration])
-	const [isTaskExpanded, setIsTaskExpanded] = useState(true)
-	const [isTextExpanded, setIsTextExpanded] = useState(false)
-	const [showSeeMore, setShowSeeMore] = useState(false)
-	const textContainerRef = useRef<HTMLDivElement>(null)
-	const textRef = useRef<HTMLDivElement>(null)
-	const contextWindow = selectedModelInfo?.contextWindow || 1
-
-	/*
+/*
 	When dealing with event listeners in React components that depend on state
 	variables, we face a challenge. We want our listener to always use the most
 	up-to-date version of a callback function that relies on current state, but
@@ -94,6 +76,30 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 
 	After:
 	*/
+
+const TaskHeader: React.FC<TaskHeaderProps> = ({
+	task,
+	tokensIn,
+	tokensOut,
+	doesModelSupportPromptCache,
+	cacheWrites,
+	cacheReads,
+	totalCost,
+	contextTokens,
+	onClose,
+	openTaskCard,
+}) => {
+	const { apiConfiguration, currentTaskItem, experiments } = useExtensionState()
+	const { selectedModelInfo } = useMemo(() => normalizeApiConfiguration(apiConfiguration), [apiConfiguration])
+	const [isTaskExpanded, setIsTaskExpanded] = useState(true)
+	const [isTextExpanded, setIsTextExpanded] = useState(false)
+	const [showSeeMore, setShowSeeMore] = useState(false)
+	const textContainerRef = useRef<HTMLDivElement>(null)
+	const textRef = useRef<HTMLDivElement>(null)
+	const contextWindow = selectedModelInfo?.contextWindow || 1
+
+	// Check if task cards feature is enabled
+	const isTaskCardsEnabled = experiments?.[EXPERIMENT_IDS.TASK_CARDS] === true
 
 	const { height: windowHeight, width: windowWidth } = useWindowSize()
 
@@ -197,6 +203,19 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 							}}>
 							${totalCost?.toFixed(4)}
 						</div>
+					)}
+					{/* Only show Task Card button if the experiment is enabled */}
+					{isTaskCardsEnabled && openTaskCard && (
+						<VSCodeButton
+							appearance="icon"
+							onClick={() => {
+								// Open task card visualization using the prop function
+								openTaskCard(currentTaskItem?.id || "")
+							}}
+							style={{ marginLeft: 6, flexShrink: 0, color: "var(--vscode-badge-foreground)" }}
+							title="Open Task Card">
+							<span className="codicon codicon-notebook"></span>
+						</VSCodeButton>
 					)}
 					<VSCodeButton
 						appearance="icon"

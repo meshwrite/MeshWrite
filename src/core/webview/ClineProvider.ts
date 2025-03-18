@@ -528,7 +528,19 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 	}
 
 	public async postMessageToWebview(message: ExtensionMessage) {
-		await this.view?.webview.postMessage(message)
+		if (this.view && this.view.webview) {
+			console.log(`postMessageToWebview: Sending message type ${message.type}`)
+			try {
+				await this.view.webview.postMessage(message)
+				console.log(`postMessageToWebview: Message sent successfully`)
+			} catch (error) {
+				console.error(
+					`postMessageToWebview: Error sending message: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+		} else {
+			console.error(`postMessageToWebview: No webview available for message type ${message.type}`)
+		}
 	}
 
 	private async getHMRHtmlContent(webview: vscode.Webview): Promise<string> {
@@ -1860,6 +1872,21 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						await this.postStateToWebview()
 						break
 					}
+					case "openTaskCard":
+						// Just pass the taskId back to the webview to open the task card
+						await this.postMessageToWebview({
+							type: "openTaskCard",
+							text: message.text || this.getCurrentCline()?.taskId || "",
+						})
+						break
+
+					case "getTaskCardData":
+						await this.handleGetTaskCardData(message.text || this.getCurrentCline()?.taskId || "")
+						break
+
+					case "requestEditTaskCard":
+						await this.handleRequestEditTaskCard(message.text || this.getCurrentCline()?.taskId || "")
+						break
 				}
 			},
 			null,
@@ -2650,5 +2677,194 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		}
 
 		return properties
+	}
+
+	async handleGetTaskCardData(taskId: string) {
+		console.log(`=== handleGetTaskCardData called with taskId: ${taskId} ===`)
+		try {
+			if (!taskId) {
+				console.log(`handleGetTaskCardData: No taskId provided`)
+				await this.postMessageToWebview({
+					type: "taskCardData",
+					text: JSON.stringify({
+						success: false,
+						message: "No task ID provided",
+					}),
+				})
+				return
+			}
+
+			try {
+				// Log the task history state for debugging
+				const history = ((await this.getGlobalState("taskHistory")) as HistoryItem[] | undefined) || []
+				console.log(`handleGetTaskCardData: Found ${history.length} tasks in history`)
+				console.log(`handleGetTaskCardData: Looking for task with ID: ${taskId}`)
+				const historyItem = history.find((item) => item.id === taskId)
+				console.log(`handleGetTaskCardData: Found history item: ${historyItem ? "yes" : "no"}`)
+
+				// Get the task directory paths
+				const { taskDirPath } = await this.getTaskWithId(taskId)
+				console.log(`handleGetTaskCardData: Got task directory path: ${taskDirPath}`)
+
+				const taskCardPath = path.join(taskDirPath, GlobalFileNames.taskCard)
+				console.log(`handleGetTaskCardData: Looking for task card at: ${taskCardPath}`)
+
+				// Check if the task card exists
+				const taskCardExists = await fileExistsAtPath(taskCardPath)
+				console.log(`handleGetTaskCardData: Task card exists: ${taskCardExists ? "yes" : "no"}`)
+
+				if (!taskCardExists) {
+					console.log(`handleGetTaskCardData: Task card file not found at ${taskCardPath}`)
+					await this.postMessageToWebview({
+						type: "taskCardData",
+						text: JSON.stringify({
+							success: false,
+							message: `Task card not found for task ${taskId}`,
+						}),
+					})
+					return
+				}
+
+				await fs.access(taskCardPath)
+
+				// Read the task card file
+				const taskCardContent = await fs.readFile(taskCardPath, "utf-8")
+				console.log(`handleGetTaskCardData: Read task card content of length: ${taskCardContent.length}`)
+				console.log(`handleGetTaskCardData: Task card content preview: ${taskCardContent.substring(0, 100)}...`)
+
+				// Try to parse the task card to validate it
+				try {
+					const taskCard = JSON.parse(taskCardContent)
+					console.log(`handleGetTaskCardData: Task card is valid with title: ${taskCard.task_title}`)
+					console.log(`handleGetTaskCardData: Task card has ${taskCard.steps?.length || 0} steps`)
+
+					// Send a simplified response directly
+					const response = {
+						success: true,
+						message: "Task card loaded successfully",
+						task_card: taskCard,
+					}
+
+					// Use both direct webview posting and the helper method
+					if (this.view && this.view.webview) {
+						console.log(`handleGetTaskCardData: Sending task card directly to webview`)
+						this.view.webview.postMessage({
+							type: "taskCardData",
+							text: JSON.stringify(response),
+						})
+					}
+
+					// Also try the helper method
+					await this.postMessageToWebview({
+						type: "taskCardData",
+						text: JSON.stringify(response),
+					})
+
+					console.log(`handleGetTaskCardData: Task card sent via both methods`)
+				} catch (parseError) {
+					console.error(
+						`handleGetTaskCardData: Task card JSON parsing failed: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+					)
+					console.error(`handleGetTaskCardData: Invalid JSON content: ${taskCardContent}`)
+					await this.postMessageToWebview({
+						type: "taskCardData",
+						text: JSON.stringify({
+							success: false,
+							message: `Failed to parse task card JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+						}),
+					})
+				}
+			} catch (error) {
+				console.error(
+					`handleGetTaskCardData: Error accessing task or task card: ${error instanceof Error ? error.message : String(error)}`,
+				)
+				await this.postMessageToWebview({
+					type: "taskCardData",
+					text: JSON.stringify({
+						success: false,
+						message: `Could not access task card: ${error instanceof Error ? error.message : String(error)}`,
+					}),
+				})
+			}
+		} catch (error) {
+			console.error(
+				`handleGetTaskCardData: Unexpected error: ${error instanceof Error ? error.message : String(error)}`,
+			)
+			await this.postMessageToWebview({
+				type: "taskCardData",
+				text: JSON.stringify({
+					success: false,
+					message: `Unexpected error: ${error instanceof Error ? error.message : String(error)}`,
+				}),
+			})
+		}
+	}
+
+	async handleRequestEditTaskCard(taskId: string) {
+		try {
+			if (!taskId) {
+				// No task ID provided, can't edit
+				return
+			}
+
+			// Get the current Cline instance
+			const currentCline = this.getCurrentCline()
+			if (!currentCline) {
+				// No active task, can't edit
+				return
+			}
+
+			// Create a message asking Roo to edit the task card
+			const message = `Please edit the task card with ID ${taskId}. Show me the current state and help me update the status, steps, or any other information.`
+
+			// Send the message to the current task
+			await currentCline.say("text", message)
+
+			// This will trigger Roo to fetch and edit the task card
+			await currentCline.presentAssistantMessage()
+		} catch (error) {
+			this.log(`Error requesting task card edit: ${error instanceof Error ? error.message : String(error)}`)
+		}
+	}
+
+	async ensureValidTaskCard(taskId: string): Promise<boolean> {
+		try {
+			// Check if the task exists
+			const { taskDirPath } = await this.getTaskWithId(taskId)
+			const taskCardPath = path.join(taskDirPath, GlobalFileNames.taskCard)
+
+			// Check if the task card file exists
+			try {
+				await fs.access(taskCardPath)
+				console.log(`Task card exists at: ${taskCardPath}`)
+
+				// Try to read the task card
+				const taskCardContent = await fs.readFile(taskCardPath, "utf-8")
+
+				// Try to parse the task card
+				try {
+					const taskCard = JSON.parse(taskCardContent)
+					if (!taskCard.metadata || !taskCard.task_title) {
+						console.error("Task card is missing required fields")
+						return false
+					}
+					console.log(`Task card is valid with title: ${taskCard.task_title}`)
+					return true
+				} catch (parseError) {
+					console.error(
+						`Failed to parse task card: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+					)
+					return false
+				}
+			} catch (fileError) {
+				console.error(
+					`Task card file doesn't exist: ${fileError instanceof Error ? fileError.message : String(fileError)}`,
+				)
+				return false
+			}
+		} catch (error) {
+			console.error(`Task not found: ${error instanceof Error ? error.message : String(error)}`)
+			return false
+		}
 	}
 }

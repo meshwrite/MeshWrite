@@ -54,6 +54,8 @@ export interface ExtensionMessage {
 		| "browserToolEnabled"
 		| "browserConnectionResult"
 		| "remoteBrowserEnabled"
+		| "taskCardData"
+		| "openTaskCard"
 	text?: string
 	action?:
 		| "chatButtonClicked"

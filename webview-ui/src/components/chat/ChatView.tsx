@@ -31,6 +31,7 @@ import { validateCommand } from "../../utils/command-validation"
 import { getAllModes } from "../../../../src/shared/modes"
 import TelemetryBanner from "../common/TelemetryBanner"
 import { useAppTranslation } from "@/i18n/TranslationContext"
+import TaskCardView from "../taskcard/TaskCardView"
 
 interface ChatViewProps {
 	isHidden: boolean
@@ -65,6 +66,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		alwaysAllowSubtasks,
 		customModes,
 		telemetrySetting,
+		currentTaskItem,
 	} = useExtensionState()
 
 	const { t } = useAppTranslation()
@@ -100,6 +102,10 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 	// (since it relies on the content of these messages, we are deep comparing. i.e. the button state after hitting button sets enableButtons to false, and this effect otherwise would have to true again even if messages didn't change
 	const lastMessage = useMemo(() => messages.at(-1), [messages])
 	const secondLastMessage = useMemo(() => messages.at(-2), [messages])
+
+	// Add state for task card modal in the ChatView component
+	const [taskCardOpen, setTaskCardOpen] = useState(false)
+	const [taskCardId, setTaskCardId] = useState("")
 
 	function playSound(audioType: AudioType) {
 		vscode.postMessage({ type: "playSound", audioType })
@@ -1060,6 +1066,24 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 		}
 	}, [handleKeyDown])
 
+	// Add openTaskCard function
+	const openTaskCard = (taskId: string = "") => {
+		// Use the provided taskId or fall back to currentTaskItem.id if available
+		const finalTaskId = taskId || currentTaskItem?.id || ""
+
+		if (!finalTaskId) {
+			// If we still don't have a task ID, show an error (this shouldn't normally happen)
+			console.error("Cannot open task card: No task ID available")
+			return
+		}
+
+		console.log(`Opening task card for ID: ${finalTaskId}`)
+
+		// Open task card modal - this is the primary approach that should work
+		setTaskCardId(finalTaskId)
+		setTaskCardOpen(true)
+	}
+
 	return (
 		<div
 			style={{
@@ -1084,6 +1108,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 						totalCost={apiMetrics.totalCost}
 						contextTokens={apiMetrics.contextTokens}
 						onClose={handleTaskCloseButtonClick}
+						openTaskCard={openTaskCard}
 					/>
 
 					{/* Checkpoint warning message */}
@@ -1280,6 +1305,9 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 				setMode={setMode}
 				modeShortcutText={modeShortcutText}
 			/>
+
+			{/* Task Card Modal */}
+			<TaskCardView isOpen={taskCardOpen} onClose={() => setTaskCardOpen(false)} taskId={taskCardId} />
 
 			<div id="roo-portal" />
 		</div>
