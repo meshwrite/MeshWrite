@@ -13,6 +13,8 @@ import { getUseMcpToolDescription } from "./use-mcp-tool"
 import { getAccessMcpResourceDescription } from "./access-mcp-resource"
 import { getSwitchModeDescription } from "./switch-mode"
 import { getNewTaskDescription } from "./new-task"
+import { getUpdateTaskCardDescription } from "./update-task-card"
+import { getGetTaskCardDescription } from "./get-task-card"
 import { DiffStrategy } from "../../diff/DiffStrategy"
 import { McpHub } from "../../../services/mcp/McpHub"
 import { Mode, ModeConfig, getModeConfig, isToolAllowedForMode, getGroupName } from "../../../shared/modes"
@@ -38,6 +40,8 @@ const toolDescriptionMap: Record<string, (args: ToolArgs) => string | undefined>
 	search_and_replace: (args) => getSearchAndReplaceDescription(args),
 	apply_diff: (args) =>
 		args.diffStrategy ? args.diffStrategy.getToolDescription({ cwd: args.cwd, toolOptions: args.toolOptions }) : "",
+	update_task_card: (args) => getUpdateTaskCardDescription(args),
+	get_task_card: (args) => getGetTaskCardDescription(args),
 }
 
 export function getToolDescriptionsForMode(
@@ -109,4 +113,6 @@ export {
 	getSwitchModeDescription,
 	getInsertContentDescription,
 	getSearchAndReplaceDescription,
+	getUpdateTaskCardDescription,
+	getGetTaskCardDescription,
 }

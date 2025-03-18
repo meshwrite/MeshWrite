@@ -23,9 +23,49 @@ import {
 	getCapabilitiesSection,
 	getModesSection,
 	addCustomInstructions,
+	getTaskCardGuidelinesSection,
 } from "./sections"
 import { loadSystemPromptFile } from "./sections/custom-system-prompt"
 import { formatLanguage } from "../../shared/language"
+import * as fs from "fs/promises"
+import * as path from "path"
+import { GlobalFileNames } from "../../shared/globalFileNames"
+import { EXPERIMENT_IDS } from "../../shared/experiments"
+
+async function getTaskCardSection(cwd: string, taskId: string): Promise<string> {
+	try {
+		const taskDir = path.join(cwd, ".roo", "tasks", taskId)
+		const taskCardPath = path.join(taskDir, GlobalFileNames.taskCard)
+		const taskCardContent = await fs.readFile(taskCardPath, "utf-8")
+		const taskCard = JSON.parse(taskCardContent)
+
+		// Format task card content for the system prompt
+		const formattedContent = `====
+
+TASK CARD
+
+Task Title: ${taskCard.task_title}
+Description: ${taskCard.description}
+
+Current Status: ${taskCard.metadata.status}
+Created: ${taskCard.metadata.created_at}
+Last Updated: ${taskCard.metadata.updated_at}
+
+Steps:
+${taskCard.steps.map((step: any) => `- [${step.status}] Step ${step.step_number}: ${step.description}`).join("\n")}
+
+Context:
+${taskCard.context.map((ctx: string) => `- ${ctx}`).join("\n")}
+
+Notes:
+${taskCard.notes.map((note: string) => `- ${note}`).join("\n")}`
+
+		return formattedContent
+	} catch (error) {
+		// If task card doesn't exist or can't be read, return empty string
+		return ""
+	}
+}
 
 async function generatePrompt(
 	context: vscode.ExtensionContext,
@@ -42,6 +82,7 @@ async function generatePrompt(
 	experiments?: Record<string, boolean>,
 	enableMcpServerCreation?: boolean,
 	rooIgnoreInstructions?: string,
+	taskId?: string,
 ): Promise<string> {
 	if (!context) {
 		throw new Error("Extension context is required for generating system prompt")
@@ -54,11 +95,15 @@ async function generatePrompt(
 	const modeConfig = getModeBySlug(mode, customModeConfigs) || modes.find((m) => m.slug === mode) || modes[0]
 	const roleDefinition = promptComponent?.roleDefinition || modeConfig.roleDefinition
 
-	const [modesSection, mcpServersSection] = await Promise.all([
+	// Only include task card section if TASK_CARDS experiment is enabled
+	const shouldIncludeTaskCard = experiments?.[EXPERIMENT_IDS.TASK_CARDS] === true && taskId
+
+	const [modesSection, mcpServersSection, taskCardSection] = await Promise.all([
 		getModesSection(context),
 		modeConfig.groups.some((groupEntry) => getGroupName(groupEntry) === "mcp")
 			? getMcpServersSection(mcpHub, effectiveDiffStrategy, enableMcpServerCreation)
 			: Promise.resolve(""),
+		shouldIncludeTaskCard ? getTaskCardSection(cwd, taskId) : Promise.resolve(""),
 	])
 
 	const basePrompt = `${roleDefinition}
@@ -88,7 +133,11 @@ ${getRulesSection(cwd, supportsComputerUse, effectiveDiffStrategy, experiments)}
 
 ${getSystemInfoSection(cwd, mode, customModeConfigs)}
 
-${getObjectiveSection()}
+${taskCardSection}
+
+${getTaskCardGuidelinesSection(experiments)}
+
+${getObjectiveSection(experiments)}
 
 ${await addCustomInstructions(promptComponent?.customInstructions || modeConfig.customInstructions || "", globalCustomInstructions || "", cwd, mode, { language: formatLanguage(vscode.env.language), rooIgnoreInstructions })}`
 
@@ -110,6 +159,7 @@ export const SYSTEM_PROMPT = async (
 	experiments?: Record<string, boolean>,
 	enableMcpServerCreation?: boolean,
 	rooIgnoreInstructions?: string,
+	taskId?: string,
 ): Promise<string> => {
 	if (!context) {
 		throw new Error("Extension context is required for generating system prompt")
@@ -167,5 +217,6 @@ ${customInstructions}`
 		experiments,
 		enableMcpServerCreation,
 		rooIgnoreInstructions,
+		taskId,
 	)
 }

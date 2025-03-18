@@ -169,6 +169,8 @@ export interface ClineSayTool {
 		| "switchMode"
 		| "newTask"
 		| "finishTask"
+		| "updateTaskCard"
+		| "getTaskCard"
 	path?: string
 	diff?: string
 	content?: string
@@ -176,6 +178,8 @@ export interface ClineSayTool {
 	filePattern?: string
 	mode?: string
 	reason?: string
+	taskTitle?: string
+	task_id?: string
 }
 
 // Must keep in sync with system prompt.

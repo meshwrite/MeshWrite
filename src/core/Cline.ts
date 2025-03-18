@@ -78,6 +78,7 @@ import { insertGroups } from "./diff/insert-groups"
 import { telemetryService } from "../services/telemetry/TelemetryService"
 import { validateToolUse, isToolAllowedForMode, ToolName } from "./mode-validator"
 
+// Get workspace directory
 const cwd =
 	vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0) ?? path.join(os.homedir(), "Desktop") // may or may not exist but fs checking existence would immediately ask for permission which would be bad UX, need to come up with a better solution
 
@@ -586,6 +587,42 @@ export class Cline extends EventEmitter<ClineEvents> {
 
 		await this.say("text", task, images)
 		this.isInitialized = true
+
+		// Initialize task card
+		const taskDir = await this.ensureTaskDirectoryExists()
+		const taskCardPath = path.join(taskDir, GlobalFileNames.taskCard)
+
+		console.log(`Initializing task card at path: ${taskCardPath}`)
+
+		// Check if task card already exists
+		try {
+			await fs.access(taskCardPath)
+			console.log(`Task card already exists at: ${taskCardPath}`)
+		} catch {
+			console.log(`Creating new task card at: ${taskCardPath}`)
+		}
+
+		const taskCard = {
+			metadata: {
+				task_id: this.taskId,
+				created_at: new Date().toISOString(),
+				updated_at: new Date().toISOString(),
+				status: "active",
+				parent_task_id: this.parentTask?.taskId || null,
+			},
+			task_title: task || "Untitled Task",
+			description: "",
+			steps: [],
+			context: [],
+			notes: [],
+		}
+
+		try {
+			await fs.writeFile(taskCardPath, JSON.stringify(taskCard, null, 2))
+			console.log(`Successfully wrote task card to: ${taskCardPath}`)
+		} catch (error) {
+			console.error(`Error writing task card: ${(error as Error).message}`)
+		}
 
 		let imageBlocks: Anthropic.ImageBlockParam[] = formatResponse.imageBlocks(images)
 
@@ -1325,46 +1362,29 @@ export class Cline extends EventEmitter<ClineEvents> {
 			}
 			case "tool_use":
 				const toolDescription = (): string => {
-					switch (block.name) {
-						case "execute_command":
-							return `[${block.name} for '${block.params.command}']`
-						case "read_file":
-							return `[${block.name} for '${block.params.path}']`
-						case "write_to_file":
-							return `[${block.name} for '${block.params.path}']`
-						case "apply_diff":
-							return `[${block.name} for '${block.params.path}']`
-						case "search_files":
-							return `[${block.name} for '${block.params.regex}'${
-								block.params.file_pattern ? ` in '${block.params.file_pattern}'` : ""
-							}]`
-						case "insert_content":
-							return `[${block.name} for '${block.params.path}']`
-						case "search_and_replace":
-							return `[${block.name} for '${block.params.path}']`
-						case "list_files":
-							return `[${block.name} for '${block.params.path}']`
-						case "list_code_definition_names":
-							return `[${block.name} for '${block.params.path}']`
-						case "browser_action":
-							return `[${block.name} for '${block.params.action}']`
-						case "use_mcp_tool":
-							return `[${block.name} for '${block.params.server_name}']`
-						case "access_mcp_resource":
-							return `[${block.name} for '${block.params.server_name}']`
-						case "ask_followup_question":
-							return `[${block.name} for '${block.params.question}']`
-						case "attempt_completion":
-							return `[${block.name}]`
-						case "switch_mode":
-							return `[${block.name} to '${block.params.mode_slug}'${block.params.reason ? ` because: ${block.params.reason}` : ""}]`
-						case "new_task": {
-							const mode = block.params.mode ?? defaultModeSlug
-							const message = block.params.message ?? "(no message)"
-							const modeName = getModeBySlug(mode, customModes)?.name ?? mode
-							return `[${block.name} in ${modeName} mode: '${message}']`
-						}
+					let description = `Tool [${block.name}]`
+					if (block.name === "execute_command") {
+						description += ` (${block.params.command})`
+					} else if (block.name === "read_file") {
+						description += ` (${block.params.path})`
+					} else if (block.name === "write_to_file") {
+						description += ` (${block.params.path})`
+					} else if (block.name === "search_files") {
+						description += ` (${block.params.path})`
+					} else if (block.name === "list_files") {
+						description += ` (${block.params.path})`
+					} else if (block.name === "browser_action") {
+						description += ` (${block.params.action})`
+					} else if (block.name === "use_mcp_tool") {
+						description += ` (${block.params.server_name}/${block.params.tool_name})`
+					} else if (block.name === "access_mcp_resource") {
+						description += ` (${block.params.server_name}/${block.params.uri})`
+					} else if (block.name === "ask_followup_question") {
+						description += ` (${block.params.question})`
+					} else if (block.name === "update_task_card") {
+						description += " (update task card)"
 					}
+					return description
 				}
 
 				if (this.didRejectTool) {
@@ -3067,6 +3087,185 @@ export class Cline extends EventEmitter<ClineEvents> {
 							await handleError("inspecting site", error)
 							break
 						}
+					}
+
+					case "update_task_card": {
+						const content: string | undefined = block.params.content
+						try {
+							if (block.partial) {
+								const partialMessage = JSON.stringify({
+									tool: "updateTaskCard",
+									content: removeClosingTag("content", content),
+								})
+								await this.ask("tool", partialMessage, block.partial).catch(() => {})
+								break
+							} else {
+								if (!content) {
+									this.consecutiveMistakeCount++
+									pushToolResult(
+										await this.sayAndCreateMissingParamError("update_task_card", "content"),
+									)
+									break
+								}
+								this.consecutiveMistakeCount = 0
+
+								// Verify experiments enabled
+								const { experiments } = (await this.providerRef.deref()?.getState()) ?? {}
+								if (!Experiments.isEnabled(experiments ?? {}, EXPERIMENT_IDS.TASK_CARDS)) {
+									pushToolResult(
+										formatResponse.toolError(
+											"Task Cards feature is not enabled. Enable it in settings.",
+										),
+									)
+									break
+								}
+
+								// Try to extract task card title from content for a nicer message
+								let taskTitle = "task"
+								try {
+									const taskCardData = JSON.parse(content)
+									if (taskCardData.task_title) {
+										taskTitle = `"${taskCardData.task_title}"`
+									}
+								} catch {
+									// If we can't parse the JSON, just use the default "task"
+								}
+
+								// Send the tool message for approval
+								const completeMessage = JSON.stringify({
+									tool: "updateTaskCard",
+									content,
+									taskTitle, // Include taskTitle to display in UI
+								})
+
+								const didApprove = await askApproval("tool", completeMessage)
+								if (!didApprove) {
+									break
+								}
+
+								// Update the task card
+								try {
+									const { updateTaskCard } = await import("./prompts/tools/update-task-card")
+									const globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
+
+									// Call the updateTaskCard function with the correct parameter order
+									const result = await updateTaskCard(
+										content, // JSON content
+										this.taskId, // Task ID
+										cwd, // Workspace directory
+										globalStoragePath, // Global storage path
+									)
+
+									if (!result.success) {
+										// Provide more detailed guidance for JSON errors
+										if (
+											result.message.includes("Invalid JSON format") ||
+											result.message.includes("JSON appears to have unbalanced quotes")
+										) {
+											pushToolResult(
+												formatResponse.toolError(
+													`${result.message}\n\nPlease ensure your JSON is correctly formatted:\n` +
+														`1. All strings and property names must be in double quotes\n` +
+														`2. Escape special characters, especially quotes, with backslashes\n` +
+														`3. Check for missing commas between properties or array items\n` +
+														`4. Remove any trailing commas in arrays or objects\n\n` +
+														`Try simplifying your update and checking for any special characters in strings.`,
+												),
+											)
+										} else {
+											pushToolResult(formatResponse.toolError(result.message))
+										}
+										break
+									}
+
+									pushToolResult(result.message)
+								} catch (error) {
+									handleError(`update task card`, error)
+								}
+							}
+						} catch (error) {
+							handleError(`update task card`, error)
+						}
+						break
+					}
+
+					case "get_task_card": {
+						try {
+							const task_id = block.params.task_id
+							if (block.partial) {
+								const partialMessage = JSON.stringify({
+									tool: "getTaskCard",
+									task_id,
+								})
+								await this.ask("tool", partialMessage, block.partial).catch(() => {})
+								break
+							} else {
+								this.consecutiveMistakeCount = 0
+
+								// Get the task card using the cwd variable that's already defined
+								try {
+									// Send the tool message for approval
+									const completeMessage = JSON.stringify({
+										tool: "getTaskCard",
+										task_id,
+									})
+
+									const didApprove = await askApproval("tool", completeMessage)
+									if (!didApprove) {
+										break
+									}
+
+									const { getTaskCard } = await import("./prompts/tools/get-task-card")
+									const globalStoragePath = this.providerRef.deref()?.context.globalStorageUri.fsPath
+
+									// Make sure we always have the globalStoragePath
+									if (!globalStoragePath) {
+										pushToolResult(
+											formatResponse.toolError(
+												"Cannot access task card without global storage path. " +
+													"This is likely a system configuration issue.",
+											),
+										)
+										break
+									}
+
+									const result = await getTaskCard(task_id, this.taskId, cwd, globalStoragePath)
+
+									if (!result.success) {
+										// Add more diagnostic information if the directory doesn't exist
+										if (result.message.includes("does not exist or is not accessible")) {
+											pushToolResult(
+												formatResponse.toolError(
+													`${result.message}\n\n` +
+														`Expected task directory: ${globalStoragePath}/tasks/${task_id || this.taskId}\n` +
+														`Please check if the task ID is correct and if the task card was initialized properly.`,
+												),
+											)
+										} else {
+											pushToolResult(formatResponse.toolError(result.message))
+										}
+										break
+									}
+
+									// Return both the success message and the task card data
+									pushToolResult(
+										JSON.stringify(
+											{
+												message: result.message,
+												task_card: result.data,
+											},
+											null,
+											2,
+										),
+									)
+								} catch (error) {
+									handleError(`get task card`, error)
+								}
+							}
+						} catch (error) {
+							handleError(`get task card`, error)
+						}
+						break
 					}
 				}
 				break

@@ -20,6 +20,7 @@ import Thumbnails from "../common/Thumbnails"
 import { convertToMentionPath } from "../../utils/path-mentions"
 import { MAX_IMAGES_PER_MESSAGE } from "./ChatView"
 import ContextMenu from "./ContextMenu"
+import ContextBar from "./ContextBar"
 
 interface ChatTextAreaProps {
 	inputValue: string
@@ -544,6 +545,37 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			[updateCursorPosition],
 		)
 
+		// Extract mentions from input text
+		const mentions = useMemo(() => {
+			const matches = inputValue.matchAll(mentionRegexGlobal)
+			return Array.from(matches).map((match) => {
+				const value = match[1]
+				let type = ContextMenuOptionType.File
+
+				if (value === "problems") {
+					type = ContextMenuOptionType.Problems
+				} else if (value === "terminal") {
+					type = ContextMenuOptionType.Terminal
+				} else if (value.match(/^[a-f0-9]{7,40}$/i)) {
+					type = ContextMenuOptionType.Git
+				} else if (value.endsWith("/")) {
+					type = ContextMenuOptionType.Folder
+				}
+
+				return { type, value }
+			})
+		}, [inputValue])
+
+		const handleRemoveMention = useCallback(
+			(mention: { type: ContextMenuOptionType; value: string }) => {
+				const mentionText = `@${mention.value}`
+				const regex = new RegExp(`${mentionText}\\s*`)
+				const newValue = inputValue.replace(regex, "")
+				setInputValue(newValue)
+			},
+			[inputValue, setInputValue],
+		)
+
 		return (
 			<div
 				className="chat-text-area"
@@ -559,7 +591,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					outline: "none",
 					border: "1px solid",
 					borderColor: isFocused ? "var(--vscode-focusBorder)" : "transparent",
-					borderRadius: "2px",
+					borderRadius: "0.5rem",
 				}}
 				onDrop={async (e) => {
 					e.preventDefault()
@@ -655,6 +687,8 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						/>
 					</div>
 				)}
+
+				<ContextBar mentions={mentions} onRemoveMention={handleRemoveMention} />
 
 				<div
 					style={{

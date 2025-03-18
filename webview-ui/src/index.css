@@ -143,7 +143,7 @@
 		--chart-3: var(--vscode-charts-yellow);
 		--chart-4: var(--vscode-charts-orange);
 		--chart-5: var(--vscode-charts-green);
-		--radius: 0.5rem;
+		--radius: 0.4rem;
 	}
 }
 
@@ -157,12 +157,19 @@
 	.border-x,
 	.border-y {
 		border-color: var(--border);
+		border-radius: 0.4rem;
 	}
 
 	/* Code Block Styles */
 	pre,
 	code {
 		background-color: var(--vscode-textCodeBlock-background);
+		border-radius: 0.5rem;
+	}
+
+	/* Message Card Styles */
+	.bg-vscode-input-background\/50 {
+		border-radius: var(--radius);
 	}
 }
 
@@ -176,7 +183,24 @@ textarea:focus {
 	outline: 0 !important; /* Allow tailwind to override the `textarea:focus` rule */
 }
 
-vscode-button::part(control):focus {
+vscode-button,
+.vscrui-button {
+	border-radius: 0.4rem !important;
+	overflow: hidden !important;
+}
+
+vscode-button::part(control),
+.vscrui-button__control {
+	border-radius: 0.4rem !important;
+}
+
+vscode-button::part(content),
+.vscrui-button__content {
+	border-radius: 0.4rem !important;
+}
+
+vscode-button::part(control):focus,
+.vscrui-button__control:focus {
 	outline: none;
 }
 

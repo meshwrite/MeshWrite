@@ -32,9 +32,12 @@ export function ChatMessage({ message, isLast, isHeaderVisible, isLoading, appen
 	return (
 		<ChatMessageProvider value={{ message, isLast }}>
 			<div
-				className={cn("relative group flex flex-col text-secondary-foreground", {
-					"bg-vscode-input-background/50": message.role === "user",
-				})}>
+				className={cn(
+					"relative group flex flex-col text-secondary-foreground rounded-[0.5rem] overflow-hidden",
+					{
+						"bg-vscode-input-background/50": message.role === "user",
+					},
+				)}>
 				{isHeaderVisible && <ChatMessageHeader badges={badges} />}
 				<ChatMessageContent isHeaderVisible={isHeaderVisible} />
 				<ChatMessageActions />

@@ -43,7 +43,7 @@ const ChatRow = memo(
 		const prevHeightRef = useRef(0)
 
 		const [chatrow, { height }] = useSize(
-			<div className="px-[15px] py-[10px] pr-[6px]">
+			<div className="px-[15px] py-[10px] pr-[6px] rounded-xl">
 				<ChatRowContent {...props} />
 			</div>,
 		)
@@ -470,6 +470,42 @@ export const ChatRowContent = ({
 						<div style={{ paddingLeft: "26px", marginTop: "4px" }}>
 							<code>{tool.content}</code>
 						</div>
+					</>
+				)
+			case "updateTaskCard":
+				return (
+					<>
+						<div style={headerStyle}>
+							{toolIcon("notebook")}
+							<span style={{ fontWeight: "bold" }}>Roo wants to update the task card</span>
+						</div>
+						<CodeAccordian
+							code={tool.content}
+							language="json"
+							isExpanded={isExpanded}
+							onToggleExpand={onToggleExpand}
+						/>
+					</>
+				)
+			case "getTaskCard":
+				return (
+					<>
+						<div style={headerStyle}>
+							{toolIcon("notebook")}
+							<span style={{ fontWeight: "bold" }}>
+								{message.type === "ask"
+									? `Roo wants to retrieve ${tool.task_id ? `task card with ID ${tool.task_id}` : "the current task card"}`
+									: `Roo retrieved ${tool.task_id ? `task card with ID ${tool.task_id}` : "the current task card"}`}
+							</span>
+						</div>
+						{message.type === "say" && tool.content && (
+							<CodeAccordian
+								code={tool.content}
+								language="json"
+								isExpanded={isExpanded}
+								onToggleExpand={onToggleExpand}
+							/>
+						)}
 					</>
 				)
 			default:

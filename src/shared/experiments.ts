@@ -4,6 +4,7 @@ export const EXPERIMENT_IDS = {
 	INSERT_BLOCK: "insert_content",
 	POWER_STEERING: "powerSteering",
 	MULTI_SEARCH_AND_REPLACE: "multi_search_and_replace",
+	TASK_CARDS: "task_cards",
 } as const
 
 export type ExperimentKey = keyof typeof EXPERIMENT_IDS
@@ -32,7 +33,6 @@ export const experimentConfigsMap: Record<ExperimentKey, ExperimentConfig> = {
 	},
 	INSERT_BLOCK: {
 		name: "Use experimental insert content tool",
-
 		description:
 			"Enable the experimental insert content tool, allowing Roo to insert content at specific line numbers without needing to create a diff.",
 		enabled: false,
@@ -47,6 +47,12 @@ export const experimentConfigsMap: Record<ExperimentKey, ExperimentConfig> = {
 		name: "Use experimental multi block diff tool",
 		description:
 			"When enabled, Roo will use multi block diff tool. This will try to update multiple code blocks in the file in one request.",
+		enabled: false,
+	},
+	TASK_CARDS: {
+		name: "Enable Task Cards",
+		description:
+			"When enabled, Roo will create and maintain task cards for each task, providing better context tracking and progress monitoring. Task cards are stored alongside conversation history.",
 		enabled: false,
 	},
 }

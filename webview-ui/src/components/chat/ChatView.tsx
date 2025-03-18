@@ -1288,7 +1288,7 @@ const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryVie
 
 const ScrollToBottomButton = styled.div`
 	background-color: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 55%, transparent);
-	border-radius: 3px;
+	border-radius: 0.5rem;
 	overflow: hidden;
 	cursor: pointer;
 	display: flex;

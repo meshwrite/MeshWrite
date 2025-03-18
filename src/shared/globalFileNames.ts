@@ -6,4 +6,5 @@ export const GlobalFileNames = {
 	requestyModels: "requesty_models.json",
 	mcpSettings: "cline_mcp_settings.json",
 	unboundModels: "unbound_models.json",
+	taskCard: "task_card.json",
 }
