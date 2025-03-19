@@ -1881,7 +1881,13 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 						break
 
 					case "getTaskCardData":
-						await this.handleGetTaskCardData(message.text || this.getCurrentCline()?.taskId || "")
+						const taskDataId = message.text
+						if (taskDataId) {
+							// Call the handler with the taskId
+							await this.handleGetTaskCardData(taskDataId, message.forceRefresh || false)
+						} else {
+							console.log("getTaskCardData: No task ID provided in message")
+						}
 						break
 
 					case "requestEditTaskCard":
@@ -2679,7 +2685,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 		return properties
 	}
 
-	async handleGetTaskCardData(taskId: string) {
+	async handleGetTaskCardData(taskId: string, forceRefresh = false) {
 		console.log(`=== handleGetTaskCardData called with taskId: ${taskId} ===`)
 		try {
 			if (!taskId) {
@@ -2699,7 +2705,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				const history = ((await this.getGlobalState("taskHistory")) as HistoryItem[] | undefined) || []
 				console.log(`handleGetTaskCardData: Found ${history.length} tasks in history`)
 				console.log(`handleGetTaskCardData: Looking for task with ID: ${taskId}`)
-				const historyItem = history.find((item) => item.id === taskId)
+				const historyItem = history.find((item: HistoryItem) => item.id === taskId)
 				console.log(`handleGetTaskCardData: Found history item: ${historyItem ? "yes" : "no"}`)
 
 				// Get the task directory paths
@@ -2732,6 +2738,10 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 				console.log(`handleGetTaskCardData: Read task card content of length: ${taskCardContent.length}`)
 				console.log(`handleGetTaskCardData: Task card content preview: ${taskCardContent.substring(0, 100)}...`)
 
+				if (forceRefresh) {
+					console.log(`handleGetTaskCardData: Force refresh requested, re-reading file from disk`)
+				}
+
 				// Try to parse the task card to validate it
 				try {
 					const taskCard = JSON.parse(taskCardContent)
@@ -2741,7 +2751,7 @@ export class ClineProvider implements vscode.WebviewViewProvider {
 					// Send a simplified response directly
 					const response = {
 						success: true,
-						message: "Task card loaded successfully",
+						message: forceRefresh ? "Task card refreshed successfully" : "Task card loaded successfully",
 						task_card: taskCard,
 					}
 

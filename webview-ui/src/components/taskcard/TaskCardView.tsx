@@ -80,6 +80,23 @@ const TaskCardView = ({ isOpen, onClose, taskId }: TaskCardViewProps) => {
 	const [useDirectData, setUseDirectData] = useState(false)
 	const [currentTaskId, setCurrentTaskId] = useState<string>(taskId)
 	const requestSentRef = useRef<boolean>(false)
+	// Track expanded steps
+	const [expandedSteps, setExpandedSteps] = useState<Record<number, boolean>>({})
+
+	// Toggle step expansion when clicked
+	const toggleStepExpansion = (stepNumber: number) => {
+		setExpandedSteps((prev) => ({
+			...prev,
+			[stepNumber]: !prev[stepNumber],
+		}))
+	}
+
+	// Reset expanded steps when task card changes
+	useEffect(() => {
+		if (taskCard) {
+			setExpandedSteps({})
+		}
+	}, [taskCard])
 
 	// Reset the request flag when dialog is closed
 	useEffect(() => {
@@ -124,23 +141,29 @@ const TaskCardView = ({ isOpen, onClose, taskId }: TaskCardViewProps) => {
 		if (isOpen) {
 			console.log(`TaskCardView opened for task ID: ${currentTaskId}`)
 
-			// Reset card if opened with different task than last time
-			if (!loading && taskCard && taskCard.metadata.task_id !== currentTaskId) {
-				console.log("Task ID mismatch, resetting card:", taskCard.metadata.task_id, "vs", currentTaskId)
-				setTaskCard(null)
-				setLoading(true)
-				requestSentRef.current = false
-			}
+			// Only refresh if we don't already have a matching card or if we haven't sent a request yet
+			const needsRefresh = !taskCard || taskCard.metadata.task_id !== currentTaskId || !requestSentRef.current
 
-			// Request data when dialog opens if not already loading
-			if (!loading && !taskCard && !requestSentRef.current && currentTaskId) {
+			if (needsRefresh) {
+				console.log("Refreshing task card data")
+				// Reset card if opened with different task than last time
+				if (taskCard && taskCard.metadata.task_id !== currentTaskId) {
+					console.log("Task ID mismatch, resetting card:", taskCard.metadata.task_id, "vs", currentTaskId)
+					setTaskCard(null)
+				}
+
+				// Request fresh data
+				setLoading(true)
+				setError(null)
 				requestSentRef.current = true
+
 				try {
 					vscode.postMessage({
 						type: "getTaskCardData",
 						text: currentTaskId,
+						forceRefresh: true,
 					})
-					console.log("Task card data request sent on dialog open:", currentTaskId)
+					console.log("Task card data request sent with force refresh:", currentTaskId)
 				} catch (error) {
 					const errorMessage = error instanceof Error ? error.message : String(error)
 					setError(`Failed to send request to extension: ${errorMessage}`)
@@ -149,7 +172,7 @@ const TaskCardView = ({ isOpen, onClose, taskId }: TaskCardViewProps) => {
 				}
 			}
 		}
-	}, [isOpen, currentTaskId, loading, taskCard])
+	}, [isOpen, currentTaskId, taskCard])
 
 	// Use direct data approach only if explicitly set to true
 	useEffect(() => {
@@ -241,6 +264,56 @@ const TaskCardView = ({ isOpen, onClose, taskId }: TaskCardViewProps) => {
 		}
 	}
 
+	// Render a single step with expandable details
+	const renderStep = (step: TaskStep, color: string) => {
+		const isExpanded = expandedSteps[step.step_number] || false
+		const hasDetails = step.comments.length > 0 || step.subtask_id !== null
+
+		return (
+			<div
+				key={step.step_number}
+				className={`mb-3 py-2 border-l-2 pl-4 ${hasDetails ? "cursor-pointer hover:bg-[#1A172C]" : ""} transition-colors duration-150`}
+				style={{ borderColor: color }}
+				onClick={hasDetails ? () => toggleStepExpansion(step.step_number) : undefined}>
+				<div className="flex items-center">
+					<div className="text-xs bg-[#1F1C33] px-2 py-1 rounded mr-3">
+						{taskCard?.metadata.task_id.split("-")[0] || "task"}-{step.step_number}
+					</div>
+					<div className="flex-1">{step.description}</div>
+					{hasDetails && (
+						<div className="text-xs ml-2 mr-1">
+							<span className={`codicon codicon-chevron-${isExpanded ? "down" : "right"}`}></span>
+						</div>
+					)}
+				</div>
+
+				{/* Expandable content */}
+				{isExpanded && hasDetails && (
+					<div className="pl-6 mt-2 text-sm text-gray-400">
+						{step.subtask_id && (
+							<div className="mb-1">
+								<span className="font-medium text-gray-300">Subtask ID:</span> {step.subtask_id}
+							</div>
+						)}
+
+						{step.comments.length > 0 && (
+							<div>
+								<span className="font-medium text-gray-300">Comments:</span>
+								<ul className="list-disc pl-5 mt-1">
+									{step.comments.map((comment, idx) => (
+										<li key={idx} className="mb-1">
+											{comment}
+										</li>
+									))}
+								</ul>
+							</div>
+						)}
+					</div>
+				)}
+			</div>
+		)
+	}
+
 	const groupedSteps = getGroupedSteps()
 
 	return (
@@ -323,19 +396,7 @@ const TaskCardView = ({ isOpen, onClose, taskId }: TaskCardViewProps) => {
 										<h3 className="font-semibold text-md">IN PROGRESS</h3>
 									</div>
 									<div className="pl-5">
-										{groupedSteps.inProgress.map((step) => (
-											<div
-												key={step.step_number}
-												className="mb-3 py-2 border-l-2 pl-4"
-												style={{ borderColor: "#3F51B5" }}>
-												<div className="flex items-center">
-													<div className="text-xs bg-[#1F1C33] px-2 py-1 rounded mr-3">
-														{taskCard.metadata.task_id.split("-")[0]}-{step.step_number}
-													</div>
-													<div>{step.description}</div>
-												</div>
-											</div>
-										))}
+										{groupedSteps.inProgress.map((step) => renderStep(step, "#3F51B5"))}
 									</div>
 								</div>
 							)}
@@ -350,19 +411,7 @@ const TaskCardView = ({ isOpen, onClose, taskId }: TaskCardViewProps) => {
 										<h3 className="font-semibold text-md">TO DO</h3>
 									</div>
 									<div className="pl-5">
-										{groupedSteps.todo.map((step) => (
-											<div
-												key={step.step_number}
-												className="mb-3 py-2 border-l-2 pl-4"
-												style={{ borderColor: "#9E9E9E" }}>
-												<div className="flex items-center">
-													<div className="text-xs bg-[#1F1C33] px-2 py-1 rounded mr-3">
-														{taskCard.metadata.task_id.split("-")[0]}-{step.step_number}
-													</div>
-													<div>{step.description}</div>
-												</div>
-											</div>
-										))}
+										{groupedSteps.todo.map((step) => renderStep(step, "#9E9E9E"))}
 									</div>
 								</div>
 							)}
@@ -377,19 +426,7 @@ const TaskCardView = ({ isOpen, onClose, taskId }: TaskCardViewProps) => {
 										<h3 className="font-semibold text-md">DONE ({groupedSteps.done.length})</h3>
 									</div>
 									<div className="pl-5">
-										{groupedSteps.done.map((step) => (
-											<div
-												key={step.step_number}
-												className="mb-3 py-2 border-l-2 pl-4"
-												style={{ borderColor: "#4CAF50" }}>
-												<div className="flex items-center">
-													<div className="text-xs bg-[#1F1C33] px-2 py-1 rounded mr-3">
-														{taskCard.metadata.task_id.split("-")[0]}-{step.step_number}
-													</div>
-													<div>{step.description}</div>
-												</div>
-											</div>
-										))}
+										{groupedSteps.done.map((step) => renderStep(step, "#4CAF50"))}
 									</div>
 								</div>
 							)}
@@ -429,34 +466,24 @@ const TaskCardView = ({ isOpen, onClose, taskId }: TaskCardViewProps) => {
 
 				{/* Footer with buttons */}
 				<div className="p-4 border-t border-gray-700 flex justify-between bg-[#13111E] sticky bottom-0 z-10 w-full">
+					{taskCard && (
+						<VSCodeButton
+							appearance="secondary"
+							onClick={() => {
+								// Request to edit the task card via Roo
+								vscode.postMessage({
+									type: "requestEditTaskCard",
+									text: taskId,
+								})
+								onClose()
+							}}>
+							Edit with Roo
+						</VSCodeButton>
+					)}
+
 					<VSCodeButton appearance="secondary" onClick={onClose}>
 						Close
 					</VSCodeButton>
-
-					{taskCard && (
-						<div className="flex gap-2">
-							<VSCodeButton
-								appearance="secondary"
-								onClick={() => {
-									// Request to edit the task card via Roo
-									vscode.postMessage({
-										type: "requestEditTaskCard",
-										text: taskId,
-									})
-									onClose()
-								}}>
-								Edit with Roo
-							</VSCodeButton>
-							<VSCodeButton
-								appearance="primary"
-								onClick={() => {
-									// Implement updating task status
-									onClose()
-								}}>
-								Update Status
-							</VSCodeButton>
-						</div>
-					)}
 				</div>
 			</DialogContent>
 		</Dialog>

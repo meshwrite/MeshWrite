@@ -133,6 +133,7 @@ export interface WebviewMessage {
 	payload?: WebViewMessagePayload
 	source?: "global" | "project"
 	requestId?: string
+	forceRefresh?: boolean
 }
 
 export const checkoutDiffPayloadSchema = z.object({

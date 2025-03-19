@@ -2864,12 +2864,20 @@ export class Cline extends EventEmitter<ClineEvents> {
 					case "new_task": {
 						const mode: string | undefined = block.params.mode
 						const message: string | undefined = block.params.message
+						// Use type assertion to access parent_step_number
+						const parentStepNumber: string | undefined = (block.params as any)["parent_step_number"]
+
 						try {
 							if (block.partial) {
 								const partialMessage = JSON.stringify({
 									tool: "newTask",
+
 									mode: removeClosingTag("mode", mode),
 									message: removeClosingTag("message", message),
+									// Use different syntax to avoid linter errors
+									parent_step_number: parentStepNumber
+										? parentStepNumber.replace(/<\/parent_step_number>$/, "")
+										: undefined,
 								})
 								await this.ask("tool", partialMessage, block.partial).catch(() => {})
 								break
@@ -2896,10 +2904,25 @@ export class Cline extends EventEmitter<ClineEvents> {
 									break
 								}
 
+								// Parse parent_step_number if provided
+								let stepNumber: number | undefined = undefined
+								if (parentStepNumber) {
+									stepNumber = parseInt(parentStepNumber, 10)
+									if (isNaN(stepNumber) || stepNumber < 1) {
+										pushToolResult(
+											formatResponse.toolError(
+												`Invalid parent_step_number: ${parentStepNumber}. Must be a positive integer.`,
+											),
+										)
+										break
+									}
+								}
+
 								const toolMessage = JSON.stringify({
 									tool: "newTask",
 									mode: targetMode.name,
 									content: message,
+									parentStepNumber: stepNumber,
 								})
 								const didApprove = await askApproval("tool", toolMessage)
 
@@ -2925,6 +2948,25 @@ export class Cline extends EventEmitter<ClineEvents> {
 								const newCline = await provider.initClineWithTask(message, undefined, this)
 								this.emit("taskSpawned", newCline.taskId)
 
+								// If parent_step_number was provided and task cards experiment is enabled,
+								// update the parent task card with the subtask ID for the specified step
+								if (stepNumber !== undefined) {
+									try {
+										// Only try to update the parent task card if the experiment is enabled
+										const state = await provider.getState()
+										if (state.experiments && EXPERIMENT_IDS.TASK_CARDS in state.experiments) {
+											if (state.experiments[EXPERIMENT_IDS.TASK_CARDS]) {
+												await this.updateParentTaskCardWithSubtask(stepNumber, newCline.taskId)
+											}
+										}
+									} catch (error) {
+										console.error(
+											`Error updating parent task card with subtask: ${error instanceof Error ? error.message : String(error)}`,
+										)
+										// Continue execution even if updating the parent task card fails
+									}
+								}
+
 								pushToolResult(
 									`Successfully created new task in ${targetMode.name} mode with message: ${message}`,
 								)
@@ -2943,26 +2985,6 @@ export class Cline extends EventEmitter<ClineEvents> {
 					}
 
 					case "attempt_completion": {
-						/*
-						this.consecutiveMistakeCount = 0
-						let resultToSend = result
-						if (command) {
-							await this.say("completion_result", resultToSend)
-							// TODO: currently we don't handle if this command fails, it could be useful to let cline know and retry
-							const [didUserReject, commandResult] = await this.executeCommand(command, true)
-							// if we received non-empty string, the command was rejected or failed
-							if (commandResult) {
-								return [didUserReject, commandResult]
-							}
-							resultToSend = ""
-						}
-						const { response, text, images } = await this.ask("completion_result", resultToSend) // this prompts webview to show 'new task' button, and enable text input (which would be the 'text' here)
-						if (response === "yesButtonClicked") {
-							return [false, ""] // signals to recursive loop to stop (for now this never happens since yesButtonClicked will trigger a new task)
-						}
-						await this.say("user_feedback", text ?? "", images)
-						return [
-						*/
 						const result: string | undefined = block.params.result
 						const command: string | undefined = block.params.command
 						try {
@@ -3043,18 +3065,71 @@ export class Cline extends EventEmitter<ClineEvents> {
 								}
 
 								if (this.parentTask) {
+									// If task cards experiment is enabled, update the task card status to "completed"
+									try {
+										const state = await this.providerRef.deref()?.getState()
+										if (state?.experiments && EXPERIMENT_IDS.TASK_CARDS in state.experiments) {
+											if (state.experiments[EXPERIMENT_IDS.TASK_CARDS]) {
+												// Update task card status to "completed"
+												await this.updateTaskCardStatus("completed")
+											}
+										}
+									} catch (error) {
+										console.error(
+											`Error updating task card status: ${error instanceof Error ? error.message : String(error)}`,
+										)
+										// Continue execution even if updating the task card fails
+									}
+
 									const didApprove = await askFinishSubTaskApproval()
 
 									if (!didApprove) {
 										break
 									}
 
+									// If task cards experiment is enabled, get the task card content for the completion message
+									let completionMessage = `Task complete: ${lastMessage?.text}`
+									try {
+										const state = await this.providerRef.deref()?.getState()
+										if (state?.experiments && EXPERIMENT_IDS.TASK_CARDS in state.experiments) {
+											if (state.experiments[EXPERIMENT_IDS.TASK_CARDS]) {
+												// Get the task card content
+												const taskCardContent = await this.getTaskCardForCompletion()
+												if (taskCardContent) {
+													completionMessage = `${completionMessage}\n\n${taskCardContent}`
+												}
+											}
+										}
+									} catch (error) {
+										console.error(
+											`Error getting task card for completion: ${error instanceof Error ? error.message : String(error)}`,
+										)
+										// Continue execution even if getting the task card content fails
+									}
+
 									// tell the provider to remove the current subtask and resume the previous task in the stack
-									await this.providerRef.deref()?.finishSubTask(`Task complete: ${lastMessage?.text}`)
+									await this.providerRef.deref()?.finishSubTask(completionMessage)
 									break
 								}
 
 								// we already sent completion_result says, an empty string asks relinquishes control over button and field
+
+								// For regular tasks, update the task card status to "completed"
+								try {
+									const state = await this.providerRef.deref()?.getState()
+									if (state?.experiments && EXPERIMENT_IDS.TASK_CARDS in state.experiments) {
+										if (state.experiments[EXPERIMENT_IDS.TASK_CARDS]) {
+											// Update task card status to "completed"
+											await this.updateTaskCardStatus("completed")
+										}
+									}
+								} catch (error) {
+									console.error(
+										`Error updating task card status: ${error instanceof Error ? error.message : String(error)}`,
+									)
+									// Continue execution even if updating the task card fails
+								}
+
 								const { response, text, images } = await this.ask("completion_result", "", false)
 								if (response === "yesButtonClicked") {
 									pushToolResult("") // signals to recursive loop to stop (for now this never happens since yesButtonClicked will trigger a new task)
@@ -4203,6 +4278,223 @@ export class Cline extends EventEmitter<ClineEvents> {
 		} catch (err) {
 			this.providerRef.deref()?.log("[checkpointRestore] disabling checkpoints for this task")
 			this.enableCheckpoints = false
+		}
+	}
+
+	// Update parent task card with subtask ID for a specific step
+	private async updateParentTaskCardWithSubtask(stepNumber: number, subtaskId: string): Promise<void> {
+		try {
+			// Make sure we have a task ID (we should always have one at this point)
+			if (!this.taskId) {
+				console.error("Cannot update parent task card: No task ID available")
+				return
+			}
+
+			// Get the task directory for this task
+			const taskDir = await this.ensureTaskDirectoryExists()
+			const taskCardPath = path.join(taskDir, GlobalFileNames.taskCard)
+
+			console.log(
+				`Updating parent task card at: ${taskCardPath} with subtask ID ${subtaskId} for step ${stepNumber}`,
+			)
+
+			// Check if task card exists
+			try {
+				await fs.access(taskCardPath)
+			} catch {
+				console.error(`Parent task card does not exist at: ${taskCardPath}`)
+				return
+			}
+
+			// Read and parse the task card
+			let taskCard: any
+			try {
+				const taskCardContent = await fs.readFile(taskCardPath, "utf-8")
+				taskCard = JSON.parse(taskCardContent)
+			} catch (error) {
+				console.error(
+					`Error reading/parsing parent task card: ${error instanceof Error ? error.message : String(error)}`,
+				)
+				return
+			}
+
+			// Make sure steps array exists
+			if (!Array.isArray(taskCard.steps)) {
+				console.error("Parent task card has no steps array")
+				return
+			}
+
+			// Find the step with the matching step number
+			const stepIndex = taskCard.steps.findIndex((step: any) => step.step_number === stepNumber)
+			if (stepIndex === -1) {
+				console.error(`Step number ${stepNumber} not found in parent task card`)
+				return
+			}
+
+			// Update the step with the subtask ID
+			taskCard.steps[stepIndex].subtask_id = subtaskId
+
+			// Also update the updated_at timestamp in metadata
+			if (taskCard.metadata) {
+				taskCard.metadata.updated_at = new Date().toISOString()
+			}
+
+			// Write the updated task card back to disk
+			try {
+				await fs.writeFile(taskCardPath, JSON.stringify(taskCard, null, 2))
+				console.log(`Successfully updated parent task card with subtask ID ${subtaskId} for step ${stepNumber}`)
+			} catch (error) {
+				console.error(
+					`Error writing updated parent task card: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+		} catch (error) {
+			console.error(
+				`Unexpected error updating parent task card: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+	}
+
+	// Update task card status to "completed"
+	private async updateTaskCardStatus(status: string): Promise<void> {
+		try {
+			// Make sure we have a task ID
+			if (!this.taskId) {
+				console.error("Cannot update task card status: No task ID available")
+				return
+			}
+
+			// Get the task directory for this task
+			const taskDir = await this.ensureTaskDirectoryExists()
+			const taskCardPath = path.join(taskDir, GlobalFileNames.taskCard)
+
+			console.log(`Updating task card status at: ${taskCardPath} to "${status}"`)
+
+			// Check if task card exists
+			try {
+				await fs.access(taskCardPath)
+			} catch {
+				console.error(`Task card does not exist at: ${taskCardPath}`)
+				return
+			}
+
+			// Read and parse the task card
+			let taskCard: any
+			try {
+				const taskCardContent = await fs.readFile(taskCardPath, "utf-8")
+				taskCard = JSON.parse(taskCardContent)
+			} catch (error) {
+				console.error(
+					`Error reading/parsing task card: ${error instanceof Error ? error.message : String(error)}`,
+				)
+				return
+			}
+
+			// Update the status in metadata
+			if (taskCard.metadata) {
+				taskCard.metadata.updated_at = new Date().toISOString()
+				taskCard.metadata.status = status
+			} else {
+				// Create metadata if it doesn't exist
+				taskCard.metadata = {
+					task_id: this.taskId,
+					created_at: new Date().toISOString(),
+					updated_at: new Date().toISOString(),
+					status: status,
+					parent_task_id: this.parentTask?.taskId || null,
+				}
+			}
+
+			// Write the updated task card back to disk
+			try {
+				await fs.writeFile(taskCardPath, JSON.stringify(taskCard, null, 2))
+				console.log(`Successfully updated task card status to "${status}"`)
+			} catch (error) {
+				console.error(
+					`Error writing updated task card: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+		} catch (error) {
+			console.error(
+				`Unexpected error updating task card status: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+	}
+
+	// Get task card content for including in completion message
+	private async getTaskCardForCompletion(): Promise<string> {
+		try {
+			// Make sure we have a task ID
+			if (!this.taskId) {
+				console.error("Cannot get task card: No task ID available")
+				return ""
+			}
+
+			// Get the task directory for this task
+			const taskDir = await this.ensureTaskDirectoryExists()
+			const taskCardPath = path.join(taskDir, GlobalFileNames.taskCard)
+
+			console.log(`Getting task card at: ${taskCardPath} for completion message`)
+
+			// Check if task card exists
+			try {
+				await fs.access(taskCardPath)
+			} catch {
+				console.error(`Task card does not exist at: ${taskCardPath}`)
+				return ""
+			}
+
+			// Read and parse the task card
+			let taskCard: any
+			try {
+				const taskCardContent = await fs.readFile(taskCardPath, "utf-8")
+				taskCard = JSON.parse(taskCardContent)
+
+				// Format the task card content for the completion message
+				const formattedContent = `
+==== SUBTASK CARD COMPLETION ====
+
+Task ID: ${taskCard.metadata?.task_id || this.taskId}
+Title: ${taskCard.task_title || "Untitled Task"}
+Description: ${taskCard.description || "No description"}
+
+Status: ${taskCard.metadata?.status || "unknown"}
+Created: ${taskCard.metadata?.created_at || "unknown"}
+Updated: ${taskCard.metadata?.updated_at || "unknown"}
+
+Steps:
+${
+	Array.isArray(taskCard.steps)
+		? taskCard.steps
+				.map(
+					(step: any) =>
+						`- [${step.status || "unknown"}] Step ${step.step_number}: ${step.description}${
+							step.comments && step.comments.length > 0 ? `\n  Comments: ${step.comments.join(", ")}` : ""
+						}`,
+				)
+				.join("\n")
+		: "No steps defined"
+}
+
+Context:
+${Array.isArray(taskCard.context) ? taskCard.context.map((ctx: string) => `- ${ctx}`).join("\n") : "No context defined"}
+
+Notes:
+${Array.isArray(taskCard.notes) ? taskCard.notes.map((note: string) => `- ${note}`).join("\n") : "No notes defined"}
+====
+`
+				return formattedContent
+			} catch (error) {
+				console.error(
+					`Error reading/parsing task card: ${error instanceof Error ? error.message : String(error)}`,
+				)
+				return ""
+			}
+		} catch (error) {
+			console.error(
+				`Unexpected error getting task card: ${error instanceof Error ? error.message : String(error)}`,
+			)
+			return ""
 		}
 	}
 }

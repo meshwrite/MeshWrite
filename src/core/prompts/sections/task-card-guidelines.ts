@@ -10,11 +10,14 @@ export function getTaskCardGuidelinesSection(experiments?: Record<string, boolea
 
 TASK CARD MANAGEMENT
 
-The task card provides essential context for your work. Treat it as a source of truth for ongoing tasks and maintain it progressively:
+⚠️ CRITICAL: ALWAYS CREATE A TASK CARD BEFORE STARTING IMPLEMENTATION ⚠️
 
-1. INITIAL SETUP - For new tasks:
+The task card is ESSENTIAL for tracking progress and maintaining context. You MUST create it at the beginning of each task:
+
+1. INITIAL SETUP - For ALL tasks:
+   - IMMEDIATELY create a task card when a new implementation or coding task begins
+   - Use update_task_card tool to establish the initial card BEFORE any code changes
    - First identify the core task from the user's initial message
-   - Don't try to populate all task card details immediately
    - Start with minimal information: task title and a brief description
    - Add initial steps focused on information gathering (reading files, searching code, asking questions)
    - Update the task card as you learn more about the project
@@ -33,7 +36,18 @@ The task card provides essential context for your work. Treat it as a source of 
    - Add notes for important observations
    - Add new context items as you discover relevant information
 
-4. JSON FORMATTING - Careful attention required:
+4. SUBTASKS - For large or complex steps:
+   - When a step should be implemented as a separate subtask, use the new_task tool
+   - Include the parent_step_number parameter to specify which step this subtask is for
+   - Example: <new_task><mode>code</mode><message>Implement feature X (include context if needed)</message><parent_step_number>3</parent_step_number></new_task>
+   - The parent task card will be automatically updated with the subtask ID
+   - When a subtask completes:
+     * Its task card status is automatically updated to "completed"
+     * The task card content is returned to the parent task in the completion message
+     * This provides continuity and context between parent and child tasks
+     * The parent task can then continue with the knowledge from the subtask
+
+5. JSON FORMATTING - Careful attention required:
    - Ensure valid JSON when updating task cards
    - Do not include any metadata fields - they are handled automatically
    - Use double quotes for all strings and property names
@@ -41,11 +55,13 @@ The task card provides essential context for your work. Treat it as a source of 
    - Especially escape any double quotes within strings using \\"
    - If you encounter JSON errors, simplify your content and try again
 
-5. RETRIEVE AND REFERENCE - Use get_task_card to check current state
+6. RETRIEVE AND REFERENCE - Use get_task_card to check current state
 
-6. PROGRESS TRACKING:
+7. PROGRESS TRACKING:
    - Individual step status values can be "planned", "in_progress", or "completed"
    - Step comments document important details about each step's execution
+
+❗ IMPORTANT: Creating a task card is NOT optional. It must be done for ALL implementation tasks to ensure proper tracking and continuity across sessions. Without a task card, important context will be lost.
 
 Remember: Build the task card incrementally. Prioritize accuracy over completeness - it's better to have a partially complete but accurate task card than one filled with guesses or hallucinated details. The task card serves as a persistent memory, ensuring continuity across sessions.`
 }
